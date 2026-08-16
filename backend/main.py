@@ -1,347 +1,738 @@
-"""Main FastAPI application."""
+"""
+MediConnect Backend - FastAPI Python Server
+Complete backend with all working endpoints
+"""
 
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
-from datetime import timedelta
-from typing import List
-from decouple import config
-from loguru import logger
+from pydantic import BaseModel
+from typing import List, Optional
+from datetime import datetime, timedelta
+import json
+import os
+from enum import Enum
 
-import models
-import schemas
-from database import get_db, init_db, engine
-from auth import (
-    authenticate_user,
-    create_access_token,
-    get_current_active_user,
-    get_password_hash,
-    ACCESS_TOKEN_EXPIRE_MINUTES
-)
-from services.notifications import email_service, sms_service, push_service
-from services.currency import currency_service
-from services.payment import payment_service
-from services.geolocation import geolocation_service
-
-# Initialize database
-models.Base.metadata.create_all(bind=engine)
-
-# Create FastAPI app
-app = FastAPI(
-    title="MediConnect API",
-    description="Healthcare Supply Chain Management Platform API",
-    version="1.0.0"
-)
+app = FastAPI(title="MediConnect API", version="1.0.0")
 
 # CORS configuration
-origins = config('ALLOWED_ORIGINS', default='*').split(',')
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins if origins != ['*'] else ["*"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- AUTHENTICATION ENDPOINTS ---
+# ==================== DATA MODELS ====================
 
-@app.post("/api/auth/register", response_model=schemas.UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    """Register a new user."""
-    # Check if user exists
-    db_user = db.query(models.User).filter(models.User.email == user.email).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    db_user = db.query(models.User).filter(models.User.username == user.username).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Username already taken")
-    
-    # Create user
-    hashed_password = get_password_hash(user.password)
-    db_user = models.User(
-        email=user.email,
-        username=user.username,
-        hashed_password=hashed_password,
-        full_name=user.full_name,
-        user_type=user.user_type,
-        phone=user.phone,
-        location=user.location
-    )
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    
-    # Create default settings
-    settings = models.UserSettings(user_id=db_user.id)
-    db.add(settings)
-    db.commit()
-    
-    # Send welcome email
-    await email_service.send_email(
-        to_email=user.email,
-        subject="Welcome to MediConnect",
-        html_content=f"<h2>Welcome {user.full_name}!</h2><p>Your account has been created successfully.</p>"
-    )
-    
-    logger.info(f"New user registered: {user.username}")
-    return db_user
+class UserRole(str, Enum):
+    CUSTOMER = "customer"
+    HOSPITAL = "hospital"
+    SUPPORT = "support"
 
-@app.post("/api/auth/login", response_model=schemas.Token)
-async def login(
-    form_data: OAuth2PasswordRequestForm = Depends(),
-    db: Session = Depends(get_db)
-):
-    """Login and get access token."""
-    user = authenticate_user(db, form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
-    )
-    
-    logger.info(f"User logged in: {user.username}")
-    return {"access_token": access_token, "token_type": "bearer"}
+class OrderStatus(str, Enum):
+    PENDING = "Pending"
+    PROCESSING = "Processing"
+    OUT_FOR_DELIVERY = "Out for Delivery"
+    DELIVERED = "Delivered"
+    CANCELLED = "Cancelled"
 
-@app.get("/api/auth/me", response_model=schemas.UserResponse)
-async def get_current_user_info(
-    current_user: models.User = Depends(get_current_active_user)
-):
-    """Get current user information."""
-    return current_user
+class PaymentMethod(str, Enum):
+    CARD = "card"
+    UPI = "upi"
+    NETBANKING = "netbanking"
+    WALLET = "wallet"
+    COD = "cod"
 
-# --- SETTINGS ENDPOINTS ---
+class LoginRequest(BaseModel):
+    username: str
+    password: str
 
-@app.get("/api/settings", response_model=schemas.SettingsResponse)
-async def get_settings(
-    current_user: models.User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """Get user settings."""
-    settings = db.query(models.UserSettings).filter(
-        models.UserSettings.user_id == current_user.id
-    ).first()
-    
-    if not settings:
-        # Create default settings if not exists
-        settings = models.UserSettings(user_id=current_user.id)
-        db.add(settings)
-        db.commit()
-        db.refresh(settings)
-    
-    return settings
+class User(BaseModel):
+    id: int
+    username: str
+    name: str
+    email: str
+    phone: str
+    location: str
+    role: UserRole
 
-@app.put("/api/settings", response_model=schemas.SettingsResponse)
-async def update_settings(
-    settings_update: schemas.SettingsUpdate,
-    current_user: models.User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """Update user settings."""
-    settings = db.query(models.UserSettings).filter(
-        models.UserSettings.user_id == current_user.id
-    ).first()
-    
-    if not settings:
-        settings = models.UserSettings(user_id=current_user.id)
-        db.add(settings)
-    
-    # Update only provided fields
-    update_data = settings_update.dict(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(settings, field, value)
-    
-    db.commit()
-    db.refresh(settings)
-    
-    logger.info(f"Settings updated for user: {current_user.username}")
-    return settings
+class Product(BaseModel):
+    id: int
+    name: str
+    brand: str
+    category: str
+    stock: int
+    critical: bool
+    rating: float
+    marketPrice: float
+    price: float
+    savings: float
+    supplier: str
+    location: str
+    description: Optional[str] = ""
 
-# --- PRODUCT ENDPOINTS ---
+class CartItem(BaseModel):
+    productId: int
+    quantity: int
 
-@app.get("/api/products", response_model=List[schemas.ProductResponse])
-async def get_products(
-    skip: int = 0,
-    limit: int = 100,
-    category: str = None,
-    urgent: bool = None,
-    search: str = None,
-    db: Session = Depends(get_db)
-):
-    """Get all products with optional filters."""
-    query = db.query(models.Product)
+class Order(BaseModel):
+    id: str
+    userId: int
+    items: List[CartItem]
+    status: OrderStatus
+    amount: float
+    date: str
+    driver: Optional[str] = "Pending"
+    vehicle: Optional[str] = "-"
+    eta: Optional[str] = "Processing"
+    deliveryLocation: str
+
+class PaymentRequest(BaseModel):
+    orderId: str
+    method: PaymentMethod
+    amount: float
+    cardNumber: Optional[str] = None
+    cardExpiry: Optional[str] = None
+    cardCVV: Optional[str] = None
+    cardName: Optional[str] = None
+
+class ProductEntry(BaseModel):
+    name: str
+    brand: str
+    category: str
+    stock: int
+    marketPrice: float
+    price: float
+    supplier: str
+    location: str
+    description: Optional[str] = ""
+
+class SalesEntry(BaseModel):
+    productId: int
+    quantity: int
+    customerId: int
+    salePrice: float
+    date: str
+
+# ==================== IN-MEMORY DATABASE ====================
+
+# Users Database
+USERS_DB = {
+    "customer": {
+        "id": 1,
+        "username": "customer",
+        "password": "customer123",
+        "name": "Rajesh Kumar",
+        "email": "rajesh@customer.com",
+        "phone": "+91 98765 43210",
+        "location": "City Hospital, Vadodara",
+        "role": "customer"
+    },
+    "cityhospital": {
+        "id": 2,
+        "username": "cityhospital",
+        "password": "hospital123",
+        "name": "City Hospital",
+        "email": "admin@cityhospital.com",
+        "phone": "+91 99887 76655",
+        "location": "Vadodara, Gujarat",
+        "role": "hospital"
+    },
+    "admin": {
+        "id": 3,
+        "username": "admin",
+        "password": "admin123",
+        "name": "Admin Support",
+        "email": "admin@mediconnect.com",
+        "phone": "+91 88776 65544",
+        "location": "MediConnect HQ",
+        "role": "support"
+    }
+}
+
+# Products Database
+PRODUCTS_DB = [
+    {
+        "id": 1,
+        "name": "Remdesivir Inj. 100mg",
+        "brand": "Cipla • Kandivali Distributors",
+        "category": "emergency",
+        "stock": 3,
+        "critical": True,
+        "rating": 4.8,
+        "marketPrice": 32000,
+        "price": 28800,
+        "savings": 10,
+        "supplier": "Kandivali Distributors",
+        "location": "2.5 km",
+        "description": "Emergency COVID-19 treatment injection"
+    },
+    {
+        "id": 2,
+        "name": "Tocilizumab 400mg",
+        "brand": "Roche • Healthcare Solutions",
+        "category": "emergency",
+        "stock": 8,
+        "critical": True,
+        "rating": 4.7,
+        "marketPrice": 40000,
+        "price": 35200,
+        "savings": 12,
+        "supplier": "Healthcare Solutions",
+        "location": "3.1 km",
+        "description": "Immunosuppressive drug for severe cases"
+    },
+    {
+        "id": 3,
+        "name": "Enoxaparin Sodium",
+        "brand": "Sanofi • Apollo Pharmacy Hub",
+        "category": "pharma",
+        "stock": 12,
+        "critical": False,
+        "rating": 4.5,
+        "marketPrice": 620,
+        "price": 450,
+        "savings": 27,
+        "supplier": "Apollo Pharmacy Hub",
+        "location": "1.8 km",
+        "description": "Blood thinner medication"
+    },
+    {
+        "id": 4,
+        "name": "Surgical Gloves (Box)",
+        "brand": "Ansell • MedPlus Distributors",
+        "category": "surgical",
+        "stock": 234,
+        "critical": False,
+        "rating": 4.9,
+        "marketPrice": 250,
+        "price": 180,
+        "savings": 28,
+        "supplier": "MedPlus Distributors",
+        "location": "0.9 km",
+        "description": "Premium quality surgical gloves"
+    },
+    {
+        "id": 5,
+        "name": "N95 Masks (Pack of 10)",
+        "brand": "3M • Wellness Pharma",
+        "category": "consumables",
+        "stock": 567,
+        "critical": False,
+        "rating": 4.7,
+        "marketPrice": 180,
+        "price": 120,
+        "savings": 33,
+        "supplier": "Wellness Pharma",
+        "location": "1.2 km",
+        "description": "High filtration respiratory protection"
+    },
+    {
+        "id": 6,
+        "name": "Digital Thermometer",
+        "brand": "Omron • Healthcare Solutions",
+        "category": "equipment",
+        "stock": 78,
+        "critical": False,
+        "rating": 4.6,
+        "marketPrice": 650,
+        "price": 450,
+        "savings": 31,
+        "supplier": "Healthcare Solutions",
+        "location": "2.3 km",
+        "description": "Digital temperature measurement device"
+    },
+    {
+        "id": 7,
+        "name": "Paracetamol 650mg",
+        "brand": "Crocin • Apollo Pharmacy Hub",
+        "category": "pharma",
+        "stock": 12,
+        "critical": False,
+        "rating": 4.5,
+        "marketPrice": 60,
+        "price": 45,
+        "savings": 25,
+        "supplier": "Apollo Pharmacy Hub",
+        "location": "1.8 km",
+        "description": "Pain relief and fever reducer"
+    },
+    {
+        "id": 8,
+        "name": "Azithromycin 500mg",
+        "brand": "Azithral • MedPlus Distributors",
+        "category": "pharma",
+        "stock": 45,
+        "critical": False,
+        "rating": 4.7,
+        "marketPrice": 180,
+        "price": 145,
+        "savings": 19,
+        "supplier": "MedPlus Distributors",
+        "location": "0.9 km",
+        "description": "Antibiotic for bacterial infections"
+    }
+]
+
+# Orders Database
+ORDERS_DB = []
+ORDER_COUNTER = 9922
+
+# Sales Database
+SALES_DB = []
+
+# Analytics Data
+ANALYTICS_DB = {
+    "monthly_savings": [
+        {"month": "Jan", "amount": 6800},
+        {"month": "Feb", "amount": 8200},
+        {"month": "Mar", "amount": 7500},
+        {"month": "Apr", "amount": 9100},
+        {"month": "May", "amount": 8800},
+        {"month": "Jun", "amount": 9500},
+        {"month": "Jul", "amount": 8900},
+        {"month": "Aug", "amount": 9800},
+        {"month": "Sep", "amount": 8600},
+        {"month": "Oct", "amount": 9200},
+        {"month": "Nov", "amount": 8400},
+        {"month": "Dec", "amount": 7800}
+    ]
+}
+
+# ==================== API ENDPOINTS ====================
+
+@app.get("/")
+def read_root():
+    return {
+        "message": "MediConnect API Server",
+        "version": "1.0.0",
+        "status": "running",
+        "endpoints": [
+            "/api/auth/login",
+            "/api/products",
+            "/api/products/{id}",
+            "/api/products/add",
+            "/api/orders",
+            "/api/orders/{id}",
+            "/api/orders/place",
+            "/api/payment/process",
+            "/api/analytics",
+            "/api/sales",
+            "/api/export/products",
+            "/api/export/orders",
+            "/api/export/sales"
+        ]
+    }
+
+# ==================== AUTH ENDPOINTS ====================
+
+@app.post("/api/auth/login")
+def login(request: LoginRequest):
+    """Login endpoint"""
+    user_data = USERS_DB.get(request.username)
     
-    if category:
-        query = query.filter(models.Product.category == category)
-    if urgent is not None:
-        query = query.filter(models.Product.urgent == urgent)
+    if not user_data or user_data["password"] != request.password:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    # Remove password from response
+    response_data = {k: v for k, v in user_data.items() if k != "password"}
+    
+    return {
+        "success": True,
+        "user": response_data,
+        "token": f"token_{user_data['id']}_{datetime.now().timestamp()}"
+    }
+
+# ==================== PRODUCTS ENDPOINTS ====================
+
+@app.get("/api/products")
+def get_products(category: Optional[str] = None, search: Optional[str] = None):
+    """Get all products with optional filtering"""
+    products = PRODUCTS_DB.copy()
+    
+    if category and category != "all":
+        if category == "critical":
+            products = [p for p in products if p["critical"]]
+        else:
+            products = [p for p in products if p["category"] == category]
+    
     if search:
-        query = query.filter(
-            models.Product.name.contains(search) | 
-            models.Product.brand.contains(search)
-        )
+        search_lower = search.lower()
+        products = [p for p in products if 
+                   search_lower in p["name"].lower() or 
+                   search_lower in p["brand"].lower()]
     
-    products = query.offset(skip).limit(limit).all()
-    return products
+    return {
+        "success": True,
+        "products": products,
+        "count": len(products)
+    }
 
-@app.get("/api/products/{product_id}", response_model=schemas.ProductResponse)
-async def get_product(product_id: int, db: Session = Depends(get_db)):
-    """Get a specific product."""
-    product = db.query(models.Product).filter(models.Product.id == product_id).first()
+@app.get("/api/products/{product_id}")
+def get_product(product_id: int):
+    """Get single product by ID"""
+    product = next((p for p in PRODUCTS_DB if p["id"] == product_id), None)
+    
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    return product
+    
+    return {
+        "success": True,
+        "product": product
+    }
 
-@app.post("/api/products", response_model=schemas.ProductResponse, status_code=status.HTTP_201_CREATED)
-async def create_product(
-    product: schemas.ProductCreate,
-    current_user: models.User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """Create a new product."""
-    db_product = models.Product(**product.dict())
-    db.add(db_product)
-    db.commit()
-    db.refresh(db_product)
+@app.post("/api/products/add")
+def add_product(product: ProductEntry):
+    """Add new product to inventory"""
+    new_id = max([p["id"] for p in PRODUCTS_DB]) + 1 if PRODUCTS_DB else 1
     
-    logger.info(f"Product created: {product.name}")
-    return db_product
+    new_product = {
+        "id": new_id,
+        "name": product.name,
+        "brand": product.brand,
+        "category": product.category,
+        "stock": product.stock,
+        "critical": product.stock < 10,
+        "rating": 4.5,
+        "marketPrice": product.marketPrice,
+        "price": product.price,
+        "savings": round(((product.marketPrice - product.price) / product.marketPrice) * 100, 2),
+        "supplier": product.supplier,
+        "location": product.location,
+        "description": product.description
+    }
+    
+    PRODUCTS_DB.append(new_product)
+    
+    return {
+        "success": True,
+        "message": "Product added successfully",
+        "product": new_product
+    }
 
-# --- ORDER ENDPOINTS ---
+@app.put("/api/products/{product_id}")
+def update_product(product_id: int, product: ProductEntry):
+    """Update existing product"""
+    product_index = next((i for i, p in enumerate(PRODUCTS_DB) if p["id"] == product_id), None)
+    
+    if product_index is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    PRODUCTS_DB[product_index].update({
+        "name": product.name,
+        "brand": product.brand,
+        "category": product.category,
+        "stock": product.stock,
+        "critical": product.stock < 10,
+        "marketPrice": product.marketPrice,
+        "price": product.price,
+        "savings": round(((product.marketPrice - product.price) / product.marketPrice) * 100, 2),
+        "supplier": product.supplier,
+        "location": product.location,
+        "description": product.description
+    })
+    
+    return {
+        "success": True,
+        "message": "Product updated successfully",
+        "product": PRODUCTS_DB[product_index]
+    }
 
-@app.get("/api/orders", response_model=List[schemas.OrderResponse])
-async def get_orders(
-    current_user: models.User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """Get user's orders."""
-    orders = db.query(models.Order).filter(
-        models.Order.user_id == current_user.id
-    ).order_by(models.Order.created_at.desc()).all()
-    return orders
+@app.delete("/api/products/{product_id}")
+def delete_product(product_id: int):
+    """Delete product from inventory"""
+    global PRODUCTS_DB
+    
+    product = next((p for p in PRODUCTS_DB if p["id"] == product_id), None)
+    
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    PRODUCTS_DB = [p for p in PRODUCTS_DB if p["id"] != product_id]
+    
+    return {
+        "success": True,
+        "message": "Product deleted successfully"
+    }
 
-@app.post("/api/orders", response_model=schemas.OrderResponse, status_code=status.HTTP_201_CREATED)
-async def create_order(
-    order_data: schemas.OrderCreate,
-    current_user: models.User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """Create a new order."""
-    # Get user settings to check confirmation requirement
-    settings = db.query(models.UserSettings).filter(
-        models.UserSettings.user_id == current_user.id
-    ).first()
-    
-    # Calculate total
-    total_amount = 0
-    total_items = 0
-    
-    for item in order_data.items:
-        product = db.query(models.Product).filter(models.Product.id == item.product_id).first()
-        if not product:
-            raise HTTPException(status_code=404, detail=f"Product {item.product_id} not found")
-        
-        if product.stock < item.quantity:
-            raise HTTPException(status_code=400, detail=f"Insufficient stock for {product.name}")
-        
-        total_amount += product.price * item.quantity
-        total_items += item.quantity
-    
-    # Create order
-    import random
-    order_number = f"ORD-{random.randint(10000, 99999)}"
-    
-    db_order = models.Order(
-        order_number=order_number,
-        user_id=current_user.id,
-        status=models.OrderStatus.PROCESSING,
-        total_amount=total_amount,
-        total_items=total_items,
-        payment_method=order_data.payment_method,
-        delivery_address=order_data.delivery_address
-    )
-    db.add(db_order)
-    db.commit()
-    db.refresh(db_order)
-    
-    # Create order items and update stock
-    for item in order_data.items:
-        product = db.query(models.Product).filter(models.Product.id == item.product_id).first()
-        
-        order_item = models.OrderItem(
-            order_id=db_order.id,
-            product_id=item.product_id,
-            quantity=item.quantity,
-            price=product.price,
-            subtotal=product.price * item.quantity
-        )
-        db.add(order_item)
-        
-        # Update product stock
-        product.stock -= item.quantity
-    
-    db.commit()
-    
-    # Send notifications based on settings
-    if settings:
-        if settings.email_notifications and settings.order_updates:
-            await email_service.send_order_confirmation(
-                to_email=current_user.email,
-                order_number=order_number,
-                total_amount=total_amount,
-                items_count=total_items
-            )
-        
-        if settings.sms_notifications and settings.order_updates:
-            await sms_service.send_order_update(
-                to_phone=current_user.phone,
-                order_number=order_number,
-                status="Processing"
-            )
-        
-        if settings.push_notifications and settings.order_updates:
-            await push_service.send_push(
-                user_id=current_user.id,
-                title="Order Placed",
-                body=f"Order {order_number} placed successfully"
-            )
-    
-    # Create notification
-    notification = models.Notification(
-        user_id=current_user.id,
-        title="Order Placed",
-        message=f"Order {order_number} placed successfully",
-        type="success"
-    )
-    db.add(notification)
-    db.commit()
-    
-    logger.info(f"Order created: {order_number} for user {current_user.username}")
-    return db_order
+# ==================== ORDERS ENDPOINTS ====================
 
-@app.get("/api/orders/{order_id}", response_model=schemas.OrderResponse)
-async def get_order(
-    order_id: int,
-    current_user: models.User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """Get a specific order."""
-    order = db.query(models.Order).filter(
-        models.Order.id == order_id,
-        models.Order.user_id == current_user.id
-    ).first()
+@app.get("/api/orders")
+def get_orders(user_id: Optional[int] = None, status: Optional[str] = None):
+    """Get all orders with optional filtering"""
+    orders = ORDERS_DB.copy()
+    
+    if user_id:
+        orders = [o for o in orders if o["userId"] == user_id]
+    
+    if status:
+        orders = [o for o in orders if o["status"] == status]
+    
+    return {
+        "success": True,
+        "orders": orders,
+        "count": len(orders)
+    }
+
+@app.get("/api/orders/{order_id}")
+def get_order(order_id: str):
+    """Get single order by ID"""
+    order = next((o for o in ORDERS_DB if o["id"] == order_id), None)
     
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     
-    return order
+    return {
+        "success": True,
+        "order": order
+    }
 
-# Continue in next file...
+@app.post("/api/orders/place")
+def place_order(order: Order):
+    """Place a new order"""
+    global ORDER_COUNTER
+    
+    # Generate order ID
+    order_id = f"#ORD-{ORDER_COUNTER}"
+    ORDER_COUNTER += 1
+    
+    # Calculate total amount
+    total_amount = 0
+    for item in order.items:
+        product = next((p for p in PRODUCTS_DB if p["id"] == item.productId), None)
+        if product:
+            total_amount += product["price"] * item.quantity
+            # Update stock
+            product["stock"] -= item.quantity
+    
+    # Add tax
+    tax = total_amount * 0.18
+    total_amount += tax
+    
+    new_order = {
+        "id": order_id,
+        "userId": order.userId,
+        "items": [{"productId": item.productId, "quantity": item.quantity} for item in order.items],
+        "status": "Processing",
+        "amount": round(total_amount, 2),
+        "date": datetime.now().strftime("%a, %B %d, %I:%M %p"),
+        "driver": "Pending",
+        "vehicle": "-",
+        "eta": "2 hours",
+        "deliveryLocation": order.deliveryLocation
+    }
+    
+    ORDERS_DB.insert(0, new_order)
+    
+    return {
+        "success": True,
+        "message": "Order placed successfully",
+        "order": new_order
+    }
+
+@app.put("/api/orders/{order_id}/status")
+def update_order_status(order_id: str, status: OrderStatus):
+    """Update order status"""
+    order = next((o for o in ORDERS_DB if o["id"] == order_id), None)
+    
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    order["status"] = status.value
+    
+    # Update driver and ETA based on status
+    if status == OrderStatus.OUT_FOR_DELIVERY:
+        drivers = ["Rahul Sharma", "Priya Mehta", "Amit Kumar", "Sneha Patel"]
+        vehicles = ["GJ-06-XY-1234", "GJ-06-AB-5678", "GJ-06-CD-9012", "GJ-06-EF-3456"]
+        import random
+        order["driver"] = random.choice(drivers)
+        order["vehicle"] = random.choice(vehicles)
+        order["eta"] = "15 mins"
+    elif status == OrderStatus.DELIVERED:
+        order["eta"] = "Completed"
+    
+    return {
+        "success": True,
+        "message": "Order status updated",
+        "order": order
+    }
+
+# ==================== PAYMENT ENDPOINTS ====================
+
+@app.post("/api/payment/process")
+def process_payment(payment: PaymentRequest):
+    """Process payment for an order"""
+    order = next((o for o in ORDERS_DB if o["id"] == payment.orderId), None)
+    
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Simulate payment processing
+    payment_status = "success"
+    
+    # Update order status
+    order["status"] = "Processing"
+    order["paymentMethod"] = payment.method.value
+    order["paymentStatus"] = payment_status
+    
+    return {
+        "success": True,
+        "message": "Payment processed successfully",
+        "transactionId": f"TXN{datetime.now().timestamp()}",
+        "order": order
+    }
+
+# ==================== ANALYTICS ENDPOINTS ====================
+
+@app.get("/api/analytics")
+def get_analytics(user_id: Optional[int] = None):
+    """Get analytics data"""
+    user_orders = [o for o in ORDERS_DB if o["userId"] == user_id] if user_id else ORDERS_DB
+    
+    total_orders = len(user_orders)
+    total_spent = sum(o["amount"] for o in user_orders)
+    delivered_orders = len([o for o in user_orders if o["status"] == "Delivered"])
+    
+    # Calculate savings
+    total_savings = 0
+    for order in user_orders:
+        for item in order["items"]:
+            product = next((p for p in PRODUCTS_DB if p["id"] == item["productId"]), None)
+            if product:
+                savings_per_item = (product["marketPrice"] - product["price"]) * item["quantity"]
+                total_savings += savings_per_item
+    
+    return {
+        "success": True,
+        "analytics": {
+            "totalOrders": total_orders,
+            "totalSpent": round(total_spent, 2),
+            "totalSavings": round(total_savings, 2),
+            "deliveredOrders": delivered_orders,
+            "activeOrders": total_orders - delivered_orders,
+            "monthlySavings": ANALYTICS_DB["monthly_savings"]
+        }
+    }
+
+# ==================== SALES ENDPOINTS ====================
+
+@app.get("/api/sales")
+def get_sales():
+    """Get all sales records"""
+    return {
+        "success": True,
+        "sales": SALES_DB,
+        "count": len(SALES_DB)
+    }
+
+@app.post("/api/sales/add")
+def add_sale(sale: SalesEntry):
+    """Add new sales entry"""
+    new_sale = {
+        "id": len(SALES_DB) + 1,
+        "productId": sale.productId,
+        "quantity": sale.quantity,
+        "customerId": sale.customerId,
+        "salePrice": sale.salePrice,
+        "date": sale.date,
+        "totalAmount": sale.quantity * sale.salePrice
+    }
+    
+    SALES_DB.append(new_sale)
+    
+    # Update product stock
+    product = next((p for p in PRODUCTS_DB if p["id"] == sale.productId), None)
+    if product:
+        product["stock"] -= sale.quantity
+    
+    return {
+        "success": True,
+        "message": "Sale recorded successfully",
+        "sale": new_sale
+    }
+
+# ==================== EXPORT ENDPOINTS ====================
+
+@app.get("/api/export/products")
+def export_products():
+    """Export products as CSV data"""
+    csv_data = "ID,Name,Brand,Category,Stock,Market Price,Sale Price,Savings %,Supplier,Location\n"
+    
+    for product in PRODUCTS_DB:
+        csv_data += f"{product['id']},{product['name']},{product['brand']},{product['category']},"
+        csv_data += f"{product['stock']},{product['marketPrice']},{product['price']},{product['savings']},"
+        csv_data += f"{product['supplier']},{product['location']}\n"
+    
+    return {
+        "success": True,
+        "filename": f"products_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        "data": csv_data,
+        "count": len(PRODUCTS_DB)
+    }
+
+@app.get("/api/export/orders")
+def export_orders():
+    """Export orders as CSV data"""
+    csv_data = "Order ID,User ID,Status,Amount,Date,Items Count,Driver,Vehicle,ETA,Location\n"
+    
+    for order in ORDERS_DB:
+        csv_data += f"{order['id']},{order['userId']},{order['status']},{order['amount']},"
+        csv_data += f"{order['date']},{len(order['items'])},{order['driver']},{order['vehicle']},"
+        csv_data += f"{order['eta']},{order['deliveryLocation']}\n"
+    
+    return {
+        "success": True,
+        "filename": f"orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        "data": csv_data,
+        "count": len(ORDERS_DB)
+    }
+
+@app.get("/api/export/sales")
+def export_sales():
+    """Export sales as CSV data"""
+    csv_data = "Sale ID,Product ID,Customer ID,Quantity,Sale Price,Total Amount,Date\n"
+    
+    for sale in SALES_DB:
+        csv_data += f"{sale['id']},{sale['productId']},{sale['customerId']},{sale['quantity']},"
+        csv_data += f"{sale['salePrice']},{sale['totalAmount']},{sale['date']}\n"
+    
+    return {
+        "success": True,
+        "filename": f"sales_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        "data": csv_data,
+        "count": len(SALES_DB)
+    }
+
+# ==================== STATS ENDPOINTS ====================
+
+@app.get("/api/stats")
+def get_stats(user_id: Optional[int] = None):
+    """Get dashboard statistics"""
+    user_orders = [o for o in ORDERS_DB if o["userId"] == user_id] if user_id else ORDERS_DB
+    
+    total_savings = 0
+    for order in user_orders:
+        for item in order["items"]:
+            product = next((p for p in PRODUCTS_DB if p["id"] == item["productId"]), None)
+            if product:
+                savings = (product["marketPrice"] - product["price"]) * item["quantity"]
+                total_savings += savings
+    
+    active_orders = len([o for o in user_orders if o["status"] in ["Processing", "Out for Delivery"]])
+    suppliers_count = len(set(p["supplier"] for p in PRODUCTS_DB))
+    low_stock_count = len([p for p in PRODUCTS_DB if p["stock"] < 15])
+    
+    return {
+        "success": True,
+        "stats": {
+            "totalSavings": round(total_savings, 2),
+            "activeOrders": active_orders,
+            "suppliers": suppliers_count,
+            "lowStockAlerts": low_stock_count
+        }
+    }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
