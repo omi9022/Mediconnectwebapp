@@ -1,13 +1,5 @@
 import React, { useState } from 'react';
-import {
-  Home, Users, Calendar, DollarSign, UserPlus, FileText,
-  Bell, Settings, LogOut, Search, Filter, Download,
-  Activity, AlertCircle, CheckCircle, Clock, TrendingUp,
-  Phone, Mail, MapPin, ChevronRight, Plus, Edit, Trash2,
-  Stethoscope, Bed, Pill, Syringe, Building, MoreVertical,
-  Printer, CreditCard, XSquare, CheckSquare, Calendar as CalendarIcon,
-  Check, Eye, FileDown, RefreshCw, X
-} from 'lucide-react';
+import { Chrome as Home, Users, Calendar, DollarSign, UserPlus, FileText, Bell, Settings, LogOut, Search, ListFilter as Filter, Download, Activity, CircleAlert as AlertCircle, CircleCheck as CheckCircle, Clock, TrendingUp, Phone, Mail, MapPin, ChevronRight, Plus, CreditCard as Edit, Trash2, Stethoscope, Bed, Pill, Syringe, Building, MoveVertical as MoreVertical, Printer, CreditCard, Square as XSquare, SquareCheck as CheckSquare, Calendar as CalendarIcon, Check, Eye, FileDown, RefreshCw, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Modal, StatusBadge } from './shared';
 import { getRelativeDate, getFormattedDate } from '../../utils/dateUtils';
@@ -221,6 +213,15 @@ export default function HospitalDashboard({ user, onLogout }: HospitalDashboardP
 
   // --- Helpers ---
 
+  const statColorMap: Record<string, { bg: string; text: string }> = {
+    blue:   { bg: 'bg-blue-100',   text: 'text-blue-600' },
+    green:  { bg: 'bg-green-100',  text: 'text-green-600' },
+    orange: { bg: 'bg-orange-100', text: 'text-orange-600' },
+    red:    { bg: 'bg-red-100',    text: 'text-red-600' },
+    yellow: { bg: 'bg-yellow-100', text: 'text-yellow-600' },
+    purple: { bg: 'bg-purple-100', text: 'text-purple-600' },
+  };
+
   const getStatusColor = (status: string) => {
     const colors: any = {
       'Critical': 'bg-red-100 text-red-700',
@@ -267,8 +268,8 @@ export default function HospitalDashboard({ user, onLogout }: HospitalDashboardP
         {stats.map((stat) => (
           <div key={stat.id} className="bg-white rounded-xl p-6 border border-slate-200 hover:shadow-lg transition-all hover:-translate-y-1">
             <div className="flex items-center justify-between mb-4">
-              <div className={`w-12 h-12 bg-${stat.color}-100 rounded-xl flex items-center justify-center`}>
-                <stat.icon className={`text-${stat.color}-600`} size={24} />
+              <div className={`w-12 h-12 ${statColorMap[stat.color]?.bg || 'bg-slate-100'} rounded-xl flex items-center justify-center`}>
+                <stat.icon className={`${statColorMap[stat.color]?.text || 'text-slate-600'}`} size={24} />
               </div>
               <span className={`px-3 py-1 rounded-full text-sm font-medium ${
                 stat.trend === 'up' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'

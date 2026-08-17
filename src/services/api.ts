@@ -137,7 +137,7 @@ class ApiService {
     if (response.success) {
       this.token = response.token;
       localStorage.setItem('authToken', response.token);
-      localStorage.setItem('user', JSON.stringify(response.user));
+      // Session user is managed by storage.ts (saveUserSession) to avoid key-shape conflicts.
     }
 
     return response;
@@ -146,12 +146,39 @@ class ApiService {
   logout() {
     this.token = null;
     localStorage.removeItem('authToken');
-    localStorage.removeItem('user');
   }
 
   getCurrentUser(): User | null {
     const userStr = localStorage.getItem('user');
-    return userStr ? JSON.parse(userStr) : null;
+    if (!userStr) return null;
+    try {
+      return JSON.parse(userStr);
+    } catch {
+      return null;
+    }
+  }
+
+  // ==================== GENERIC HTTP HELPERS ====================
+  // Used by SupportDashboard and other callers that need raw POST/PUT/DELETE.
+
+  async post<T = any>(endpoint: string, body?: any): Promise<T> {
+    return this.request<T>(endpoint, {
+      method: 'POST',
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  async put<T = any>(endpoint: string, body?: any): Promise<T> {
+    return this.request<T>(endpoint, {
+      method: 'PUT',
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  async delete<T = any>(endpoint: string): Promise<T> {
+    return this.request<T>(endpoint, {
+      method: 'DELETE',
+    });
   }
 
   // ==================== PRODUCTS ====================

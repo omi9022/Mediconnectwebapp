@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 
 interface ModalProps {
@@ -9,16 +9,29 @@ interface ModalProps {
   maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '4xl';
 }
 
-/**
- * Shared Modal component used across all dashboards
- */
-export const Modal = ({ 
-  isOpen, 
-  onClose, 
-  title, 
-  children, 
-  maxWidth = '2xl' 
+export const Modal = ({
+  isOpen,
+  onClose,
+  title,
+  children,
+  maxWidth = '2xl'
 }: ModalProps) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = 'modal-title';
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    dialogRef.current?.focus();
+
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const maxWidthClass = {
@@ -31,13 +44,25 @@ export const Modal = ({
   }[maxWidth];
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className={`bg-white rounded-xl shadow-2xl ${maxWidthClass} w-full overflow-hidden animate-in zoom-in-95 duration-200`}>
+    <div
+      className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200"
+      onClick={onClose}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className={`bg-white rounded-xl shadow-2xl ${maxWidthClass} w-full overflow-hidden animate-in zoom-in-95 duration-200 outline-none`}
+        onClick={e => e.stopPropagation()}
+      >
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-          <h3 className="font-bold text-lg text-slate-800">{title}</h3>
-          <button 
-            onClick={onClose} 
-            className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-500 hover:text-red-500"
+          <h3 id={titleId} className="font-bold text-lg text-slate-800">{title}</h3>
+          <button
+            onClick={onClose}
+            aria-label="Close dialog"
+            className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-500 hover:text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
           >
             <X size={20} />
           </button>

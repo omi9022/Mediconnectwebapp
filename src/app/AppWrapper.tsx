@@ -8,25 +8,26 @@ import DistributorDashboard from './components/DistributorDashboard';
 import AnimatedChatbot from './components/AnimatedChatbot';
 import api from '../services/api';
 import { FALLBACK_USERS } from '../utils/constants';
-import { 
-  getUserSession, 
-  saveUserSession, 
-  clearUserSession, 
-  getCustomUsers 
+import {
+  getUserSession,
+  saveUserSession,
+  clearUserSession,
+  getCustomUsers
 } from '../utils/storage';
+
+type PortalKey = 'hospital' | 'support' | 'customer' | 'distributor';
 
 export default function AppWrapper() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userType, setUserType] = useState<'hospital' | 'support' | 'customer' | 'distributor' | null>(null);
+  const [userType, setUserType] = useState<PortalKey | null>(null);
   const [userData, setUserData] = useState<any>(null);
   const [backendAvailable, setBackendAvailable] = useState(true);
 
-  // Check for existing session on mount
   useEffect(() => {
     const session = getUserSession();
-    if (session) {
+    if (session?.user && session?.userType) {
       setUserData(session.user);
-      setUserType(session.userType as 'hospital' | 'support' | 'customer' | 'distributor');
+      setUserType(session.userType as PortalKey);
       setIsAuthenticated(true);
     }
     checkBackend();
@@ -34,50 +35,39 @@ export default function AppWrapper() {
 
   const checkBackend = async () => {
     try {
-      const response = await fetch('http://localhost:8000/', { 
+      const response = await fetch('http://localhost:8000/', {
         method: 'GET',
         mode: 'cors'
       });
       setBackendAvailable(response.ok);
-      if (response.ok) {
-        console.log('✅ Backend connected - Full features enabled');
-      }
-    } catch (error) {
-      // Backend not available - using fallback mode (this is fine for testing)
+    } catch {
       setBackendAvailable(false);
-      console.log('ℹ️ Running in fallback mode (frontend only). Start backend for full features.');
     }
   };
 
-  const handleLogin = async (type: 'hospital' | 'support' | 'customer' | 'distributor', username: string, password: string) => {
+  const handleLogin = async (type: PortalKey, username: string, password: string) => {
     try {
-      // Try backend first if available
       if (backendAvailable) {
         try {
           const response = await api.login(username, password);
-          
-          if (response.success) {
+          if (response.success && response.user) {
             setUserType(type);
             setUserData(response.user);
             setIsAuthenticated(true);
             saveUserSession(response.user, type);
             return true;
           }
-        } catch (error) {
-          console.warn('Backend login failed, trying fallback');
+        } catch {
           setBackendAvailable(false);
         }
       }
 
-      // Check custom users from Support Dashboard
       const customUsers = getCustomUsers();
       const userList = type === 'hospital' ? customUsers.hospital : type === 'customer' ? customUsers.customer : type === 'distributor' ? customUsers.distributor : [];
-      
+
       const customUser = userList.find((u: any) => u.username === username && u.password === password && u.status === 'active');
       if (customUser) {
-        const userWithoutPassword = { ...customUser };
-        delete userWithoutPassword.password;
-        
+        const { password: _pw, ...userWithoutPassword } = customUser;
         setUserType(type);
         setUserData(userWithoutPassword);
         setIsAuthenticated(true);
@@ -85,22 +75,18 @@ export default function AppWrapper() {
         return true;
       }
 
-      // Fallback authentication
       const user = FALLBACK_USERS[username];
       if (user && user.password === password) {
-        const userWithoutPassword = { ...user };
-        delete userWithoutPassword.password;
-        
+        const { password: _pw, ...userWithoutPassword } = user;
         setUserType(type);
         setUserData(userWithoutPassword);
         setIsAuthenticated(true);
         saveUserSession(userWithoutPassword, type);
         return true;
       }
-      
+
       return false;
-    } catch (error) {
-      console.error('Login failed:', error);
+    } catch {
       return false;
     }
   };
@@ -115,24 +101,15 @@ export default function AppWrapper() {
 
   let content = null;
 
-  // Show login if not authenticated
   if (!isAuthenticated) {
     content = <Login onLogin={handleLogin} />;
-  }
-  // Show Support Dashboard for support users
-  else if (userType === 'support') {
+  } else if (userType === 'support') {
     content = <SupportDashboard userData={userData} onLogout={handleLogout} />;
-  }
-  // Show Hospital Dashboard for hospital users
-  else if (userType === 'hospital') {
+  } else if (userType === 'hospital') {
     content = <HospitalDashboard user={userData} onLogout={handleLogout} />;
-  }
-  // Show Customer Dashboard for customer users
-  else if (userType === 'customer') {
+  } else if (userType === 'customer') {
     content = <CustomerDashboard user={userData} onLogout={handleLogout} />;
-  }
-  // Show Distributor Dashboard for distributor users
-  else if (userType === 'distributor') {
+  } else if (userType === 'distributor') {
     content = <DistributorDashboard userData={userData} onLogout={handleLogout} />;
   }
 
@@ -140,7 +117,7 @@ export default function AppWrapper() {
     <>
       <Toaster position="top-right" richColors />
       {content}
-      {userType === 'customer' && <AnimatedChatbot userType="customer" />}
+      {userType === 'customer' && isAuthenticated && <AnimatedChatbot userType="customer" />}
     </>
   );
 }
