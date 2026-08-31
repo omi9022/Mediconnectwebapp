@@ -1,31 +1,26 @@
 import React, { useState } from 'react';
-import { Building2, Headphones, User, Truck, Mail, Lock, Eye, EyeOff, ShieldCheck, ChartBar as BarChart2, Activity, CircleCheckBig, CircleAlert as AlertCircle } from 'lucide-react';
-
-type PortalKey = 'hospital' | 'support' | 'customer' | 'distributor';
+import {
+  Building2, Headphones, User, ClipboardList,
+  Mail, Lock, Eye, EyeOff, ShieldCheck, BarChart2, Activity,
+  CircleCheckBig
+} from 'lucide-react';
 
 interface LoginProps {
-  onLogin: (userType: PortalKey, username: string, password: string) => Promise<boolean>;
+  onLogin: (userType: 'hospital' | 'support' | 'customer' | 'distributor', username: string, password: string) => Promise<boolean>;
 }
 
-const portalTabs: { key: PortalKey; label: string; icon: React.ComponentType<{ size?: number; className?: string; strokeWidth?: number }>; accent: string }[] = [
-  { key: 'hospital',    label: 'Hospital',    icon: Building2,  accent: '#1a2f5c' },
-  { key: 'support',     label: 'Support',     icon: Headphones, accent: '#1a2f5c' },
-  { key: 'customer',    label: 'Customer',    icon: User,       accent: '#1a2f5c' },
-  { key: 'distributor', label: 'Distributor', icon: Truck,      accent: '#1a2f5c' },
+const portalTabs = [
+  { key: 'hospital' as const,     label: 'Hospital',    icon: Building2 },
+  { key: 'support' as const,      label: 'Support',     icon: Headphones },
+  { key: 'customer' as const,     label: 'Customer',    icon: User },
+  { key: 'distributor' as const,  label: 'Classifier',  icon: ClipboardList },
 ];
 
-const demoCredentials: Record<PortalKey, { username: string; password: string }> = {
-  hospital:    { username: 'cityhospital', password: 'hospital123' },
-  support:     { username: 'admin',        password: 'admin123' },
-  customer:    { username: 'customer',     password: 'customer123' },
-  distributor: { username: 'distributor',  password: 'distributor123' },
-};
-
-const portalSubtitle: Record<PortalKey, string> = {
-  hospital:    'Sign in to your hospital dashboard',
-  support:     'Sign in to the support console',
-  customer:    'Sign in to your customer account',
-  distributor: 'Sign in to your distributor portal',
+const demoCredentials = {
+  hospital:    { username: 'cityhospital',  password: 'hospital123' },
+  support:     { username: 'admin',         password: 'admin123' },
+  customer:    { username: 'customer',      password: 'customer123' },
+  distributor: { username: 'distributor',   password: 'distributor123' },
 };
 
 const features = [
@@ -47,14 +42,20 @@ const features = [
 ];
 
 export default function Login({ onLogin }: LoginProps) {
-  const [activeTab, setActiveTab] = useState<PortalKey>('hospital');
+  const [activeTab, setActiveTab] = useState<'hospital' | 'support' | 'customer' | 'distributor'>('hospital');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [credentials, setCredentials] = useState({ username: '', password: '' });
 
-  const handleSelectPortal = (tab: PortalKey) => {
+  const handleTabSwitch = (tab: typeof activeTab) => {
+    setActiveTab(tab);
+    setCredentials({ username: '', password: '' });
+    setError('');
+  };
+
+  const handleQuickAccess = (tab: typeof activeTab) => {
     setActiveTab(tab);
     setCredentials(demoCredentials[tab]);
     setError('');
@@ -75,7 +76,6 @@ export default function Login({ onLogin }: LoginProps) {
   };
 
   const demo = demoCredentials[activeTab];
-  const activeLabel = portalTabs.find(t => t.key === activeTab)?.label ?? '';
 
   return (
     <div
@@ -83,11 +83,11 @@ export default function Login({ onLogin }: LoginProps) {
       style={{ background: 'radial-gradient(ellipse at 30% 50%, #1e3461 0%, #111c38 60%, #0d1628 100%)' }}
     >
       {/* Card */}
-      <div className="w-full max-w-5xl rounded-3xl overflow-hidden shadow-2xl flex flex-col md:flex-row md:min-h-[600px]">
+      <div className="w-full max-w-5xl rounded-3xl overflow-hidden shadow-2xl flex flex-col md:flex-row" style={{ minHeight: 600 }}>
 
         {/* ── LEFT PANEL ── */}
         <div
-          className="relative md:w-[44%] flex flex-col justify-between p-8 md:p-10 overflow-hidden"
+          className="relative md:w-[44%] flex flex-col justify-between p-10 overflow-hidden"
           style={{ background: 'linear-gradient(145deg, #1a2f5c 0%, #112045 100%)' }}
         >
           {/* Decorative circles */}
@@ -97,7 +97,7 @@ export default function Login({ onLogin }: LoginProps) {
 
           {/* Logo */}
           <div>
-            <div className="flex items-center gap-3 mb-8 md:mb-10">
+            <div className="flex items-center gap-3 mb-10">
               <div
                 className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
                 style={{ background: 'linear-gradient(135deg, #c9940a, #e8b820)' }}
@@ -106,16 +106,16 @@ export default function Login({ onLogin }: LoginProps) {
               </div>
               <div>
                 <p className="text-white font-bold text-lg leading-none tracking-wide">MediConnect</p>
-                <p className="text-white/50 text-[10px] tracking-[0.2em] uppercase mt-0.5">Hospital OS</p>
+                <p className="text-white/40 text-[10px] tracking-[0.2em] uppercase mt-0.5">Hospital OS</p>
               </div>
             </div>
 
             {/* Headline */}
-            <h2 className="text-white text-2xl md:text-3xl font-bold leading-tight mb-4">
+            <h2 className="text-white text-3xl font-bold leading-tight mb-4">
               Connecting care,{' '}
               <span style={{ color: '#e0a820' }}>one hospital</span> at a time.
             </h2>
-            <p className="text-white/60 text-sm leading-relaxed mb-6 md:mb-8">
+            <p className="text-white/50 text-sm leading-relaxed mb-8">
               A unified platform for hospitals and healthcare providers to manage patients, staff, stock, and billing from a single dashboard.
             </p>
 
@@ -131,7 +131,7 @@ export default function Login({ onLogin }: LoginProps) {
                   </div>
                   <div>
                     <p className="text-white/90 text-sm font-semibold">{title}</p>
-                    <p className="text-white/50 text-xs leading-relaxed mt-0.5">{desc}</p>
+                    <p className="text-white/40 text-xs leading-relaxed mt-0.5">{desc}</p>
                   </div>
                 </div>
               ))}
@@ -139,11 +139,11 @@ export default function Login({ onLogin }: LoginProps) {
           </div>
 
           {/* Stats */}
-          <div className="mt-8 md:mt-10 pt-6 border-t border-white/10 flex gap-6 md:gap-8">
+          <div className="mt-10 pt-6 border-t border-white/10 flex gap-8">
             {[['140+', 'Hospitals'], ['2.4M', 'Patients'], ['99.9%', 'Uptime']].map(([val, lbl]) => (
               <div key={lbl}>
-                <p className="text-white font-bold text-lg md:text-xl">{val}</p>
-                <p className="text-white/50 text-xs mt-0.5">{lbl}</p>
+                <p className="text-white font-bold text-xl">{val}</p>
+                <p className="text-white/40 text-xs mt-0.5">{lbl}</p>
               </div>
             ))}
           </div>
@@ -151,25 +151,23 @@ export default function Login({ onLogin }: LoginProps) {
 
         {/* ── RIGHT PANEL ── */}
         <div
-          className="flex-1 flex flex-col justify-center px-6 py-10 md:px-10 md:py-12"
+          className="flex-1 flex flex-col justify-center px-10 py-12"
           style={{ background: '#f7f3ed' }}
         >
-          <h1 className="text-2xl md:text-3xl font-bold text-slate-800 mb-1">Welcome back</h1>
-          <p className="text-slate-500 text-sm mb-6 md:mb-7">{portalSubtitle[activeTab]}</p>
+          <h1 className="text-3xl font-bold text-slate-800 mb-1">Welcome back</h1>
+          <p className="text-slate-400 text-sm mb-7">Sign in to your hospital dashboard</p>
 
           {/* Portal selector */}
-          <div role="tablist" aria-label="Select portal" className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6 md:mb-7">
+          <div className="grid grid-cols-4 gap-3 mb-7">
             {portalTabs.map(({ key, label, icon: Icon }) => {
               const active = activeTab === key;
               return (
                 <button
                   key={key}
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => handleSelectPortal(key)}
-                  className="flex flex-col items-center gap-2 py-4 px-2 rounded-xl border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400"
+                  onClick={() => handleQuickAccess(key)}
+                  className="flex flex-col items-center gap-2 py-4 px-2 rounded-xl border transition-all"
                   style={{
-                    background: '#fff',
+                    background: active ? '#fff' : '#fff',
                     borderColor: active ? '#1a2f5c' : '#e2ddd6',
                     boxShadow: active ? '0 2px 12px rgba(26,47,92,0.12)' : 'none',
                   }}
@@ -191,7 +189,7 @@ export default function Login({ onLogin }: LoginProps) {
           </div>
 
           {/* Divider */}
-          <div className="flex items-center gap-3 mb-5 md:mb-6">
+          <div className="flex items-center gap-3 mb-6">
             <div className="flex-1 h-px bg-slate-200" />
             <span className="text-slate-400 text-xs">or sign in manually</span>
             <div className="flex-1 h-px bg-slate-200" />
@@ -199,54 +197,48 @@ export default function Login({ onLogin }: LoginProps) {
 
           {/* Error */}
           {error && (
-            <div role="alert" aria-live="assertive" className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-start gap-2">
-              <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
-              <span>{error}</span>
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+              {error}
             </div>
           )}
 
           {/* Form */}
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label htmlFor="login-username" className="block text-xs font-semibold tracking-wider text-slate-500 uppercase mb-1.5">
+              <label className="block text-xs font-semibold tracking-wider text-slate-500 uppercase mb-1.5">
                 Email or Username
               </label>
               <div className="relative">
-                <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+                <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
-                  id="login-username"
                   type="text"
                   value={credentials.username}
                   onChange={e => setCredentials({ ...credentials, username: e.target.value })}
                   placeholder="cityhospital"
                   required
-                  autoComplete="username"
                   className="w-full pl-10 pr-4 py-3 text-sm rounded-xl border border-slate-200 bg-white outline-none transition-all focus:border-slate-400 focus:ring-2 focus:ring-slate-200 text-slate-800 placeholder:text-slate-300"
                 />
               </div>
             </div>
 
             <div>
-              <label htmlFor="login-password" className="block text-xs font-semibold tracking-wider text-slate-500 uppercase mb-1.5">
+              <label className="block text-xs font-semibold tracking-wider text-slate-500 uppercase mb-1.5">
                 Password
               </label>
               <div className="relative">
-                <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+                <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
-                  id="login-password"
                   type={showPassword ? 'text' : 'password'}
                   value={credentials.password}
                   onChange={e => setCredentials({ ...credentials, password: e.target.value })}
                   placeholder="••••••••••"
                   required
-                  autoComplete="current-password"
                   className="w-full pl-10 pr-11 py-3 text-sm rounded-xl border border-slate-200 bg-white outline-none transition-all focus:border-slate-400 focus:ring-2 focus:ring-slate-200 text-slate-800 placeholder:text-slate-400"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 rounded"
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
                 >
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
@@ -254,17 +246,17 @@ export default function Login({ onLogin }: LoginProps) {
             </div>
 
             <div className="flex items-center justify-between pt-1">
-              <label htmlFor="login-remember" className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  id="login-remember"
-                  type="checkbox"
-                  checked={rememberMe}
-                  onChange={e => setRememberMe(e.target.checked)}
-                  className="w-4 h-4 rounded border-slate-300 text-slate-700 focus:ring-slate-400 cursor-pointer"
-                />
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <div
+                  onClick={() => setRememberMe(!rememberMe)}
+                  className="w-4 h-4 rounded flex items-center justify-center cursor-pointer transition-colors"
+                  style={{ background: rememberMe ? '#1a2f5c' : '#e2ddd6' }}
+                >
+                  {rememberMe && <div className="w-2 h-2 rounded-sm bg-white" />}
+                </div>
                 <span className="text-slate-500 text-sm">Remember me</span>
               </label>
-              <button type="button" onClick={() => setError('Password reset is not available in demo mode.')} className="text-sm font-semibold text-slate-700 hover:text-slate-900 transition-colors">
+              <button type="button" className="text-sm font-semibold text-slate-700 hover:text-slate-900 transition-colors">
                 Forgot password?
               </button>
             </div>
@@ -272,7 +264,7 @@ export default function Login({ onLogin }: LoginProps) {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed mt-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400"
+              className="w-full py-3.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed mt-2"
               style={{ background: 'linear-gradient(135deg, #1a2f5c 0%, #243f7a 100%)' }}
             >
               {loading ? (
@@ -299,13 +291,13 @@ export default function Login({ onLogin }: LoginProps) {
               Password:{' '}
               <code className="font-mono font-bold bg-amber-100 px-1 rounded">{demo.password}</code>
               <br />
-              Or click <strong>{activeLabel}</strong> above for instant access.
+              Or click <strong>{portalTabs.find(t => t.key === activeTab)?.label}</strong> above for instant access.
             </p>
           </div>
 
           <p className="text-center text-sm text-slate-400 mt-6">
             {"Don't have an account? "}
-            <button type="button" onClick={() => setError('Contact your administrator to request access.')} className="font-bold text-slate-700 hover:text-slate-900 transition-colors">
+            <button className="font-bold text-slate-700 hover:text-slate-900 transition-colors">
               Contact Support
             </button>
           </p>

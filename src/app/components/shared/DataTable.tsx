@@ -15,9 +15,12 @@ interface DataTableProps<T> {
   className?: string;
 }
 
-export function DataTable<T extends { id?: any }>({
-  data,
-  columns,
+/**
+ * Shared data table component
+ */
+export function DataTable<T extends { id?: any }>({ 
+  data, 
+  columns, 
   onRowClick,
   emptyMessage = 'No data available',
   className = ''
@@ -36,9 +39,8 @@ export function DataTable<T extends { id?: any }>({
         <thead>
           <tr className="border-b border-slate-200 bg-slate-50">
             {columns.map((column) => (
-              <th
+              <th 
                 key={column.key}
-                scope="col"
                 className={`px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider ${column.className || ''}`}
               >
                 {column.header}
@@ -47,30 +49,25 @@ export function DataTable<T extends { id?: any }>({
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {data.map((item, index) => {
-            const clickable = !!onRowClick;
-            return (
-              <tr
-                key={item.id || index}
-                onClick={() => onRowClick?.(item)}
-                tabIndex={clickable ? 0 : undefined}
-                onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onRowClick!(item); } } : undefined}
-                className={clickable ? 'hover:bg-slate-50 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-400' : ''}
-              >
-                {columns.map((column) => (
-                  <td
-                    key={column.key}
-                    className={`px-4 py-3 text-sm ${column.className || ''}`}
-                  >
-                    {column.render
-                      ? column.render(item)
-                      : (item as any)[column.key]
-                    }
-                  </td>
-                ))}
-              </tr>
-            );
-          })}
+          {data.map((item, index) => (
+            <tr 
+              key={item.id || index}
+              onClick={() => onRowClick?.(item)}
+              className={onRowClick ? 'hover:bg-slate-50 cursor-pointer transition-colors' : ''}
+            >
+              {columns.map((column) => (
+                <td 
+                  key={column.key}
+                  className={`px-4 py-3 text-sm ${column.className || ''}`}
+                >
+                  {column.render 
+                    ? column.render(item) 
+                    : (item as any)[column.key]
+                  }
+                </td>
+              ))}
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
